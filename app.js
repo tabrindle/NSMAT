@@ -3,9 +3,63 @@ Ext.Loader.setPath({
     'jsMidiParser': 'app'
 });
 
+Base64Binary = {
+    _keyStr : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
+
+    /* will return a  Uint8Array type */
+    decodeArrayBuffer: function(input) {
+        var bytes = (input.length/4) * 3;
+        var ab = new ArrayBuffer(bytes);
+        this.decode(input, ab);
+
+        return ab;
+    },
+
+    decode: function(input, arrayBuffer) {
+        //get last chars to see if are valid
+        var lkey1 = this._keyStr.indexOf(input.charAt(input.length-1));      
+        var lkey2 = this._keyStr.indexOf(input.charAt(input.length-2));      
+
+        var bytes = (input.length/4) * 3;
+        if (lkey1 == 64) bytes--; //padding chars, so skip
+        if (lkey2 == 64) bytes--; //padding chars, so skip
+
+        var uarray;
+        var chr1, chr2, chr3;
+        var enc1, enc2, enc3, enc4;
+        var i = 0;
+        var j = 0;
+
+        if (arrayBuffer)
+            uarray = new Uint8Array(arrayBuffer);
+        else
+            uarray = new Uint8Array(bytes);
+
+        input = input.replace(/[^A-Za-z0-9\+\/\=]/g, "");
+
+        for (i=0; i<bytes; i+=3) {  
+            //get the 3 octects in 4 ascii chars
+            enc1 = this._keyStr.indexOf(input.charAt(j++));
+            enc2 = this._keyStr.indexOf(input.charAt(j++));
+            enc3 = this._keyStr.indexOf(input.charAt(j++));
+            enc4 = this._keyStr.indexOf(input.charAt(j++));
+
+            chr1 = (enc1 << 2) | (enc2 >> 4);
+            chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+            chr3 = ((enc3 & 3) << 6) | enc4;
+
+            uarray[i] = chr1;           
+            if (enc3 != 64) uarray[i+1] = chr2;
+            if (enc4 != 64) uarray[i+2] = chr3;
+        }
+
+        return uarray;  
+    }
+}
+
 JSMIDIParser = {
     // debug (bool), when enabled will log in console unimplemented events warnings and general and errors.
-    debug: false,   
+    debug: true,   
     
     // IO() should be called in order attach a listener to the INPUT HTML element
     // that will provide the binary data automating the conversion, and returning
@@ -13,7 +67,7 @@ JSMIDIParser = {
     IO: function(_fileElement, _callback){
         if (!window.File || !window.FileReader){                            // check browser compatibillity
             if (this.debug) {
-                Ext,Msg.alert("Error",'File input is not fully supported in this browser.')
+                console.log("Error",'File input is not fully supported in this browser.')
             }
             return false;
         }
@@ -26,11 +80,18 @@ JSMIDIParser = {
                 reader.readAsArrayBuffer(InputEvt.target.files[0]);         // read the binary data
                 reader.onload = (function(_t) {                             // when ready...
                     return function(e){
+                        console.log(e.target.result)
                         _callback( _t.parse(new Uint8Array(e.target.result))); // encode data with Uint8Array and call the parser
                     }
                 })(_t);                             
             };
         })(this);
+    },
+
+    AjaxIO: function(file, callback){
+
+        callback(this.parse(file));
+           
     },
     
     // parse() function reads the binary data, interpreting and spliting each chuck
@@ -79,7 +140,7 @@ JSMIDIParser = {
                 return value;
             }
         };
-        file.data = FileAsUint8Array                                            // 8 bits bytes file data array
+        file.data = FileAsUint8Array                                             // 8 bits bytes file data array
         //  ** read FILE HEADER 
         if(file.readInt(4) != 0x4D546864){                                      // Header validation failed (not MIDI standard or file corrupt.)
             Ext.Msg.alert("Error", "Not MIDI standard or file is corrupt")  
@@ -112,6 +173,7 @@ JSMIDIParser = {
             var chunkLength = file.readInt(4)                                   // var NOT USED, just for pointer move. get chunk size (bytes length)
             var e = 0                                                           // init event counter
             var endOfTrack = false                                              // FLAG for track reading secuence breaking
+            var errorCount = 0
 
             //read EVENT CHUNK
             while(!endOfTrack){
@@ -158,6 +220,11 @@ JSMIDIParser = {
                             file.readInt(metaEventLength);
                             MIDI.track[t-1].event[e-1].data = file.readInt(metaEventLength);
                             if (this.debug) console.log("Unimplemented 0xFF event! data block readed as Integer");
+                            errorCount++
+                            if(errorCount > 10000){
+                                Ext.Msg.alert("Error", "Something seems to have gone wrong during parsing.")
+                                return false
+                            }
                     };
                 }
 
@@ -206,6 +273,7 @@ JSMIDIParser = {
                 };
             };      
         };
+        console.log(MIDI)
         return MIDI;
     }
 },
@@ -213,8 +281,9 @@ JSMIDIParser = {
 Ext.application({
     name: 'jsMidiParser',
      // debug (bool), when enabled will log in console unimplemented events warnings and general and errors.
-    debug: false,   
-
+    debug: false,  
+    songname: 'Default',
+    
     requires: [
         'Ext.MessageBox',
         'Ext.TitleBar',
@@ -222,6 +291,8 @@ Ext.application({
         'Ext.chart.PolarChart',
         'Ext.chart.series.Pie',
         'Ext.chart.interactions.Rotate',
+        'Ext.chart.interactions.ItemInfo',
+        'Ext.dataview.List'
     ],
 
     views: ['Main'],
@@ -239,10 +310,27 @@ Ext.application({
             Ext.Viewport.add(Main);
             JSMIDIParser.IO('filereader1', jsMidiParser.app.MyCallback1)
             JSMIDIParser.IO('filereader2', jsMidiParser.app.MyCallback2)
-        }, 3000);
+        }, 2500);
+        counter1 = 0
+        counter2 = 0
     },
 
     MyCallback1: function(obj){
+        counter1++
+        console.log(counter1)
+        //set the title of the midi track 
+        /*var fileName = $('#filereader1').val();
+        if(!fileName){
+            var fieldset = Ext.ComponentQuery.query('#analysis1')[0]
+            fieldset.setTitle('Analysis of '+jsMidiParser.app.songname)
+        }
+        else{
+            if(filename)
+                fileName = fileName.substring(12, fileName.length) 
+            var fieldset = Ext.ComponentQuery.query('#analysis1')[0]
+            fieldset.setTitle('Analysis of '+fileName)
+        }*/
+        
         console.log("%o", obj);
         if(obj == false)
             return 0
@@ -261,7 +349,7 @@ Ext.application({
                         array1.push(data[k])
                     }
                     else
-                        console.log("event skipped")
+                        console.log("Event Skipped")
                 }
             }
         }
@@ -278,7 +366,7 @@ Ext.application({
             var value = array1[i]
             notesArray[value]++
         }
-
+        console.log("Note Array 0-127")
         console.log(notesArray)
 
         note12Array = []
@@ -293,7 +381,17 @@ Ext.application({
                 note12Array[value]++
             }
         }
+        console.log("Note Array 0-12")
         console.log(note12Array)
+
+        var total = 0
+
+        for(var i=0;i<12;i++){
+            total = total + note12Array[i]
+        }
+        //console.log("total")
+        //console.log(total)
+        
 
         var modelOne = Ext.create('jsMidiParser.model.NoteModel', {
             C: note12Array[0],
@@ -318,11 +416,27 @@ Ext.application({
 
         var chart = new Ext.chart.PolarChart({
             animate: true,
-            insetPadding: 30,
+            layout: 'fit',
             shadow: true,
             flex: 8,
-            margin: '30 0 20 0',
-            interactions: ['rotate'],
+            margin: 25,
+            interactions: ['rotate',
+                {
+                    type: 'iteminfo',
+                    listeners: {
+                        show: function(me, item, panel) {
+                            panel.setWidth(300)
+                            panel.setHeight(200)
+                            panel.setHtml(
+                                '<div style="font-weight: bold;">Note Name: ' + item.record.get('name') + '<div>' +
+                                '<div style="font-weight: bold;">Number of Occurances: ' + item.record.get('data1') + '<div>' +
+                                '<div style="font-weight: bold;">Total Note-On Occurances: ' + total + '<div>' +
+                                '<div style="font-weight: bold;">Proportion: ' + item.record.get('data1')/total*100 + '%<div>'
+                            );
+                        }
+                    }
+                }
+            ],
             colors: [
                 "#FF0000", //red - C
                 "#9000FF", //blue/purple Db
@@ -359,6 +473,19 @@ Ext.application({
             series: [{
                 type: 'pie',
                 labelField: 'name',
+                title: "Note Distribution",
+                label: {
+                    display: 'middle',
+                    contrast: true,
+                    minMargin: 10
+                },
+                tips: {
+                    width: 80,
+                    height: 25,
+                    renderer: function(storeItem, item) {
+                        this.setTitle(item.data1[1] + '</span>');
+                    }
+                },
                 xField: 'data1',
             }],
         });
@@ -366,14 +493,30 @@ Ext.application({
 
 
         var container = Ext.ComponentQuery.query('#chart1Container')[0]
-        console.log(container)
         container.add(chart);
         
         
     },
 
     MyCallback2: function(obj){
-         console.log("%o", obj);
+
+        counter2++
+        console.log(counter2)
+
+        //set the title of the midi track 
+       /* var fileName = $('#filereader2').val();
+        if(!fileName){
+            var fieldset = Ext.ComponentQuery.query('#analysis2')[0]
+            fieldset.setTitle('Analysis of '+jsMidiParser.app.songname)
+        }
+        else{
+            if(filename)
+                fileName = fileName.substring(12, fileName.length) 
+            var fieldset = Ext.ComponentQuery.query('#analysis2')[0]
+            fieldset.setTitle('Analysis of '+fileName)
+        }*/
+
+        console.log("%o", obj);
         //Ext.Msg.alert("Analysis Complete.", "File 1 Has been analyzed", Ext.EmptyFn);
         var array1 = []
         for(var i=0; i<obj.tracks; i++){
@@ -389,7 +532,7 @@ Ext.application({
                         array1.push(data[k])
                     }
                     else
-                        console.log("skpd")
+                        console.log("Event Skipped")
                 }
             }
         }
@@ -406,7 +549,7 @@ Ext.application({
             var value = array1[i]
             notesArray[value]++
         }
-
+        console.log("Note Array 0-127")
         console.log(notesArray)
 
         note12Array = []
@@ -421,7 +564,16 @@ Ext.application({
                 note12Array[value]++
             }
         }
+        console.log("Note Array 1-12")
         console.log(note12Array)
+
+        var total = 0
+
+        for(var i=0;i<12;i++){
+            total = total + note12Array[i]
+        }
+        //console.log("total")
+        //console.log(total)
 
         var modelOne = Ext.create('jsMidiParser.model.NoteModel', {
             C: note12Array[0],
@@ -446,11 +598,27 @@ Ext.application({
 
         var chart = new Ext.chart.PolarChart({
             animate: true,
-            insetPadding: 30,
             shadow: true,
             flex: 8,
-            margin: '30 0 20 0',
-            interactions: ['rotate'],
+            margin: 25,
+            title: "Note Distribution",
+            interactions: ['rotate', 
+                {
+                    type: 'iteminfo',
+                    listeners: {
+                        show: function(me, item, panel) {
+                            panel.setWidth(300)
+                            panel.setHeight(200)
+                            panel.setHtml(
+                                '<div style="font-weight: bold;">Note Name: ' + item.record.get('name') + '<div>' +
+                                '<div style="font-weight: bold;">Number of Occurances: ' + item.record.get('data1') + '<div>' +
+                                '<div style="font-weight: bold;">Total Note-On Occurances: ' + total + '<div>' +
+                                '<div style="font-weight: bold;">Proportion: ' + item.record.get('data1')/total*100 + '%<div>'
+                            );
+                        }
+                    }
+                }
+            ],
             colors: [
                 "#FF0000", //red - C
                 "#9000FF", //blue/purple Db
@@ -487,14 +655,24 @@ Ext.application({
             series: [{
                 type: 'pie',
                 labelField: 'name',
+                title: "Note Distribution",
+                label: {
+                    display: 'middle',
+                    contrast: true,
+                    minMargin: 10
+                },
+                tips: {
+                    width: 80,
+                    height: 25,
+                    renderer: function(storeItem, item) {
+                        this.setTitle(item.data1[1] + '</span>');
+                    }
+                },
                 xField: 'data1',
             }],
         });
         Ext.Viewport.add(chart);
-
-
         var container = Ext.ComponentQuery.query('#chart2Container')[0]
-        console.log(container)
         container.add(chart);
     },
 });

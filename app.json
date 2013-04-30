@@ -31,17 +31,25 @@
      *                                      //    cached inside localStorage until this value is changed.
      *                                      //  - "delta" to enable over-the-air delta update for this file
      *                                      //  - "full" means full update will be made when this file changes
+     *          "x-bootstrap": true         // (Optional)
+     *                                      // Indicates a development mode only dependency.  
+     *                                      // These files will not be copied into the build directory or referenced
+     *                                      // in the generate app.json manifest for the micro loader.
      *
      *      }
      */
     "js": [
         {
-            "path": "touch/sencha-touch.js"
+            "path": "touch/sencha-touch.js",
+            "x-bootstrap": true
         },
         {
             "path": "app.js",
             "bundle": true,  /* Indicates that all class dependencies are concatenated into this file when build */
-            "update": "delta"
+            "update": "full"
+        },
+        {
+            "path": "jquery-1.9.1.min.js"
         }
     ],
 
@@ -94,9 +102,9 @@
      * Extra resources to be copied along when build
      */
     "resources": [
-        "resources/images",
-        "resources/icons",
-        "resources/startup"
+        {
+            "path": "midi"
+        }
     ],
 
     /**
@@ -113,28 +121,8 @@
     "archivePath": "archive",
 
     /**
-     * Default paths to build this application to for each environment
-     */
-    "buildPaths": {
-        "testing": "build/testing",
-        "production": "build/production",
-        "package": "build/package",
-        "native": "build/native"
-    },
-
-    /**
-     * Build options
-     */
-    "buildOptions": {
-        "product": "touch",
-        "minVersion": 3,
-        "debug": false,
-        "logger": false
-    },
-
-    /**
      * Uniquely generated id for this application, used as prefix for localStorage keys.
      * Normally you should never change this value.
      */
-    "id": "8710df2c-8db7-48b6-a19f-a8a730361440"
+    "id": "7fd18ce4-2fc9-4730-9a43-0d98e9d4ac51"
 }
